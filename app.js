@@ -2,9 +2,8 @@
 // Application Revision Counter
 // Increment this string on every deploy to verify updates!
 // ==========================================
-const APP_VERSION = "v1.0.3";
+const APP_VERSION = "v1.0.5";
 
-// Populate version tag as soon as DOM loads
 function updateVersionDisplay() {
   const versionElement = document.getElementById('app-version');
   if (versionElement) {
@@ -40,9 +39,9 @@ const FRAME_TIME = 1 / 30; // ~30 FPS step duration
 let isProcessingFrame = false;
 let poseInstance = null;
 
-// Landmark Smoothing Cache
+// Tracking State
 let smoothedLandmarks = null;
-const SMOOTHING_FACTOR = 0.35;
+const SMOOTHING_FACTOR = 0.25;
 
 // ==========================================
 // Canvas & Video Aspect-Ratio Layout Alignment
@@ -50,11 +49,9 @@ const SMOOTHING_FACTOR = 0.35;
 function syncCanvasSize() {
   if (!videoElement || !canvasElement || !videoElement.videoWidth || !videoElement.videoHeight) return;
 
-  // Internal pixel buffer dimensions match original video stream
   canvasElement.width = videoElement.videoWidth;
   canvasElement.height = videoElement.videoHeight;
 
-  // Calculate CSS displayed bounds to match object-fit: contain letterboxing
   const containerRect = viewportContainer.getBoundingClientRect();
   const videoRatio = videoElement.videoWidth / videoElement.videoHeight;
   const containerRatio = containerRect.width / containerRect.height;
@@ -103,6 +100,27 @@ function calculateAngle(a, b, c) {
   return angle;
 }
 
+// Draw a line connecting two landmark points
+function drawBone(ctx, p1, p2, color, width) {
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+// Draw a circular joint node
+function drawJoint(ctx, point, radius, color) {
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.stroke();
+}
+
 // ==========================================
 // MediaPipe Pose Initialization
 // ==========================================
@@ -133,7 +151,7 @@ function initMediaPipePose() {
 initMediaPipePose();
 
 // ==========================================
-// MediaPipe Frame Results & Depth Processing
+// MediaPipe Frame Results & Multi-Joint Processing
 // ==========================================
 function onResults(results) {
   try {
@@ -148,93 +166,112 @@ function onResults(results) {
       const raw = results.poseLandmarks;
 
       if (!smoothedLandmarks) {
-        smoothedLandmarks = [...raw];
+        smoothedLandmarks = raw.map(p => ({ ...p }));
       } else {
         for (let i = 0; i < raw.length; i++) {
           smoothedLandmarks[i] = smoothPoint(smoothedLandmarks[i], raw[i], SMOOTHING_FACTOR);
         }
       }
 
-      // Left side joint landmarks
-      const leftHip = smoothedLandmarks[23];
-      const leftKnee = smoothedLandmarks[25];
-      const leftAnkle = smoothedLandmarks[27];
+      const w = canvasElement.width;
+      const h = canvasElement.height;
+      const point = (idx) => ({
+        x: smoothedLandmarks[idx].x * w,
+        y: smoothedLandmarks[idx].y * h,
+        visibility: smoothedLandmarks[idx].visibility
+      });
 
-      // Right side joint landmarks
-      const rightHip = smoothedLandmarks[24];
-      const rightKnee = smoothedLandmarks[26];
-      const rightAnkle = smoothedLandmarks[28];
+      // Joint Mapping (MediaPipe Indexes)
+      const lShoulder = point(11), rShoulder = point(12);
+      const lElbow = point(13),    rElbow = point(14);
+      const lWrist = point(15),    rWrist = point(16);
+      const lHip = point(23),      rHip = point(24);
+      const lKnee = point(25),     rKnee = point(26);
+      const lAnkle = point(27),    rAnkle = point(28);
 
-      const leftVis = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
-      const rightVis = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
-      const useLeft = leftVis >= rightVis;
+      // Mid-Spine Calculation (Shoulder Midpoint -> Hip Midpoint)
+      const midShoulder = { x: (lShoulder.x + rShoulder.x) / 2, y: (lShoulder.y + rShoulder.y) / 2 };
+      const midHip = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
 
-      const hip = useLeft ? leftHip : rightHip;
-      const knee = useLeft ? leftKnee : rightKnee;
-      const ankle = useLeft ? leftAnkle : rightAnkle;
+      // Calculate Primary/Near Leg for Depth Checks based on higher visibility
+      const leftVis = (lHip.visibility || 0) + (lKnee.visibility || 0) + (lAnkle.visibility || 0);
+      const rightVis = (rHip.visibility || 0) + (rKnee.visibility || 0) + (rAnkle.visibility || 0);
+      const primaryLeft = leftVis >= rightVis;
 
-      if (hip && knee && ankle && hip.visibility > 0.3 && knee.visibility > 0.3 && ankle.visibility > 0.3) {
-        
-        // 1. Dynamic Anthropometric Knee-Top Offset Calculation
-        const dx = hip.x - knee.x;
-        const dy = hip.y - knee.y;
-        const femurLength = Math.sqrt(dx * dx + dy * dy);
+      const priHip = primaryLeft ? lHip : rHip;
+      const priKnee = primaryLeft ? lKnee : rKnee;
+      const priAnkle = primaryLeft ? lAnkle : rAnkle;
 
-        const dynamicKneeOffset = femurLength * 0.14;
-        const topOfKneeY = knee.y - dynamicKneeOffset;
+      // Dynamic Anthropometric Knee-Top Offset
+      const dx = priHip.x - priKnee.x;
+      const dy = priHip.y - priKnee.y;
+      const femurLength = Math.sqrt(dx * dx + dy * dy);
+      const dynamicKneeOffset = femurLength * 0.14;
+      const topOfKneeY = priKnee.y - dynamicKneeOffset;
 
-        // 2. Powerlifting Standard Depth Check
-        const isAtDepth = hip.y >= topOfKneeY;
-        const kneeAngle = calculateAngle(hip, knee, ankle);
+      // Depth & Knee Angle Calculation
+      const isAtDepth = priHip.y >= topOfKneeY;
+      const kneeAngle = calculateAngle(
+        { x: priHip.x / w, y: priHip.y / h },
+        { x: priKnee.x / w, y: priKnee.y / h },
+        { x: priAnkle.x / w, y: priAnkle.y / h }
+      );
 
-        // 3. UI Status Updates
-        if (kneeAngleLabel) {
-          kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
-        }
-
-        if (depthStatusLabel) {
-          depthStatusLabel.innerText = isAtDepth ? "DEPTH MET" : "ABOVE PARALLEL";
-          depthStatusLabel.style.color = isAtDepth ? "#34C759" : "#FF3B30";
-        }
-
-        if (statusBadge) {
-          statusBadge.innerText = isAtDepth ? "DEPTH REACHED" : "ABOVE PARALLEL";
-          statusBadge.className = isAtDepth ? "badge depth-reached" : "badge above-parallel";
-        }
-
-        // 4. Draw Overlay Lines
-        const p1 = { x: hip.x * canvasElement.width, y: hip.y * canvasElement.height };
-        const p2 = { x: knee.x * canvasElement.width, y: knee.y * canvasElement.height };
-        const p3 = { x: ankle.x * canvasElement.width, y: ankle.y * canvasElement.height };
-        const topKneeYPx = topOfKneeY * canvasElement.height;
-
-        // Draw Skeleton Lines
-        canvasCtx.beginPath();
-        canvasCtx.moveTo(p1.x, p1.y);
-        canvasCtx.lineTo(p2.x, p2.y);
-        canvasCtx.lineTo(p3.x, p3.y);
-        canvasCtx.strokeStyle = isAtDepth ? '#34C759' : '#FF3B30';
-        canvasCtx.lineWidth = Math.max(4, Math.floor(canvasElement.width / 100));
-        canvasCtx.stroke();
-
-        // Draw Top-of-Knee Reference Line
-        canvasCtx.beginPath();
-        canvasCtx.moveTo(p1.x - 80, topKneeYPx);
-        canvasCtx.lineTo(p2.x + 80, topKneeYPx);
-        canvasCtx.strokeStyle = '#FFCC00';
-        canvasCtx.lineWidth = 3;
-        canvasCtx.setLineDash([6, 6]);
-        canvasCtx.stroke();
-        canvasCtx.setLineDash([]);
-
-        // Draw Joint Markers
-        [p1, p2, p3].forEach(point => {
-          canvasCtx.beginPath();
-          canvasCtx.arc(point.x, point.y, Math.max(6, Math.floor(canvasElement.width / 80)), 0, 2 * Math.PI);
-          canvasCtx.fillStyle = isAtDepth ? '#34C759' : '#FF3B30';
-          canvasCtx.fill();
-        });
+      // Update UI Status Labels
+      if (kneeAngleLabel) kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
+      if (depthStatusLabel) {
+        depthStatusLabel.innerText = isAtDepth ? "DEPTH MET" : "ABOVE PARALLEL";
+        depthStatusLabel.style.color = isAtDepth ? "#34C759" : "#FF3B30";
       }
+      if (statusBadge) {
+        statusBadge.innerText = isAtDepth ? "DEPTH REACHED" : "ABOVE PARALLEL";
+        statusBadge.className = isAtDepth ? "badge depth-reached" : "badge above-parallel";
+      }
+
+      const boneWidth = Math.max(3, Math.floor(w / 120));
+      const nodeRadius = Math.max(5, Math.floor(w / 90));
+      const accentColor = isAtDepth ? '#34C759' : '#FF3B30';
+
+      // 1. Draw Mid-Spine Reference Line
+      drawBone(canvasCtx, midShoulder, midHip, '#FFCC00', boneWidth + 1);
+
+      // 2. Draw Shoulder & Hip Clavicle/Pelvis Cross-Bars
+      drawBone(canvasCtx, lShoulder, rShoulder, '#0A84FF', boneWidth);
+      drawBone(canvasCtx, lHip, rHip, '#0A84FF', boneWidth);
+
+      // 3. Draw Arms (Shoulder -> Elbow -> Wrist)
+      drawBone(canvasCtx, lShoulder, lElbow, '#0A84FF', boneWidth);
+      drawBone(canvasCtx, lElbow, lWrist, '#0A84FF', boneWidth);
+      drawBone(canvasCtx, rShoulder, rElbow, '#0A84FF', boneWidth);
+      drawBone(canvasCtx, rElbow, rWrist, '#0A84FF', boneWidth);
+
+      // 4. Draw Both Legs (Hip -> Knee -> Ankle)
+      drawBone(canvasCtx, lHip, lKnee, accentColor, boneWidth);
+      drawBone(canvasCtx, lKnee, lAnkle, accentColor, boneWidth);
+      drawBone(canvasCtx, rHip, rKnee, accentColor, boneWidth);
+      drawBone(canvasCtx, rKnee, rAnkle, accentColor, boneWidth);
+
+      // 5. Draw Top-of-Knee Parallel Reference Horizon
+      canvasCtx.beginPath();
+      canvasCtx.moveTo(priHip.x - 90, topOfKneeY);
+      canvasCtx.lineTo(priKnee.x + 90, topOfKneeY);
+      canvasCtx.strokeStyle = '#FFCC00';
+      canvasCtx.lineWidth = 2.5;
+      canvasCtx.setLineDash([6, 6]);
+      canvasCtx.stroke();
+      canvasCtx.setLineDash([]);
+
+      // 6. Draw Joint Nodes
+      const allNodes = [
+        lShoulder, rShoulder, lElbow, rElbow, lWrist, rWrist,
+        lHip, rHip, lKnee, rKnee, lAnkle, rAnkle, midShoulder, midHip
+      ];
+
+      allNodes.forEach(node => {
+        if (node.visibility > 0.3) {
+          drawJoint(canvasCtx, node, nodeRadius, accentColor);
+        }
+      });
     }
     canvasCtx.restore();
   } catch (err) {
