@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lifting Form Analyzer</title>
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- MediaPipe Pose CDN Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <h1>Form Analyzer</h1>
+      <div id="status-badge" class="badge">No Video Loaded</div>
+    </header>
+
+    <!-- File Upload Section -->
+    <div class="upload-section">
+      <label for="video-upload" class="upload-btn">📁 Select Video from Camera Roll</label>
+      <input type="file" id="video-upload" accept="video/*">
+    </div>
+
+    <!-- Video & Canvas Overlay Stack -->
+    <div class="video-wrapper">
+      <video id="uploaded-video" playsinline muted></video>
+      <canvas id="output-canvas"></canvas>
+    </div>
+
+    <!-- Playback & Frame Scrubbing Controls -->
+    <div class="controls-panel">
+      <button id="btn-play-pause" class="control-btn" disabled>Play</button>
+      <button id="btn-prev-frame" class="control-btn" disabled>⏮ -1 Frame</button>
+      <button id="btn-next-frame" class="control-btn" disabled>+1 Frame ⏭</button>
+    </div>
+
+    <!-- Real-Time Metrics Display -->
+    <div class="metrics-panel">
+      <div class="metric">
+        <span class="label">Knee Angle</span>
+        <span id="knee-angle" class="value">--°</span>
+      </div>
+      <div class="metric">
+        <span class="label">Squat Depth</span>
+        <span id="depth-status" class="value">--</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

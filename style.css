@@ -1,0 +1,135 @@
+body {
+  margin: 0;
+  background-color: #121212;
+  color: #FFFFFF;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  justify-content: center;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 0.8rem;
+  background-color: #8E8E93;
+}
+
+.badge.depth-reached {
+  background-color: #34C759;
+}
+
+.badge.above-parallel {
+  background-color: #FF3B30;
+}
+
+.upload-section {
+  margin-bottom: 12px;
+}
+
+#video-upload {
+  display: none;
+}
+
+.upload-btn {
+  display: block;
+  text-align: center;
+  background-color: #0A84FF;
+  color: white;
+  padding: 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.video-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 9 / 16; /* Standard vertical mobile video */
+  background-color: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#uploaded-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#output-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.controls-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.control-btn {
+  background-color: #2C2C2E;
+  color: #FFF;
+  border: none;
+  padding: 12px 8px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.control-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.metrics-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+  background: #1C1C1E;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.label {
+  font-size: 0.8rem;
+  color: #8E8E93;
+}
+
+.value {
+  font-size: 1.3rem;
+  font-weight: bold;
+  margin-top: 4px;
+}
