@@ -1,11 +1,20 @@
 // ==========================================
 // DOM Elements Setup
 // ==========================================
-const videoElement = document.getElementById('video') || document.querySelector('video');
-const canvasElement = document.getElementById('canvas') || document.querySelector('canvas');
+const videoElement = document.getElementById('uploaded-video') || document.querySelector('video');
+const canvasElement = document.getElementById('output-canvas') || document.querySelector('canvas');
 const canvasCtx = canvasElement ? canvasElement.getContext('2d') : null;
+const fileInput = document.getElementById('video-upload');
 
-// Frame processing lock state
+const kneeAngleLabel = document.getElementById('knee-angle');
+const depthStatusLabel = document.getElementById('depth-status');
+const statusBadge = document.getElementById('status-badge');
+
+const btnPlayPause = document.getElementById('btn-play-pause');
+const btnPrevFrame = document.getElementById('btn-prev-frame');
+const btnNextFrame = document.getElementById('btn-next-frame');
+
+const FRAME_TIME = 1 / 30; // Approx 30 FPS frame duration
 let isProcessingFrame = false;
 
 // ==========================================
@@ -33,7 +42,7 @@ const pose = new Pose({
 });
 
 pose.setOptions({
-  modelComplexity: 1,
+  modelComplexity: 0, // Lower complexity for smooth GPU performance and crash-free playback on iOS Safari
   smoothLandmarks: true,
   enableSegmentation: false,
   smoothSegmentation: false,
@@ -50,7 +59,7 @@ function onResults(results) {
   try {
     if (!canvasElement || !canvasCtx || !videoElement) return;
 
-    // Synchronize canvas size with video aspect ratio
+    // Synchronize canvas dimensions with actual video dimensions
     if (videoElement.videoWidth && canvasElement.width !== videoElement.videoWidth) {
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
@@ -82,10 +91,7 @@ function onResults(results) {
       // Ensure key landmarks are visible before evaluating depth
       if (hip && knee && ankle && hip.visibility > 0.3 && knee.visibility > 0.3 && ankle.visibility > 0.3) {
         
-        // ----------------------------------------------------
         // 1. Dynamic Anthropometric Knee-Top Offset Calculation
-        // ----------------------------------------------------
-        // Calculate 2D Euclidean length of the femur segment (Hip to Knee)
         const dx = hip.x - knee.x;
         const dy = hip.y - knee.y;
         const femurLength = Math.sqrt(dx * dx + dy * dy);
@@ -94,40 +100,26 @@ function onResults(results) {
         const dynamicKneeOffset = femurLength * 0.14;
         const topOfKneeY = knee.y - dynamicKneeOffset;
 
-        // ----------------------------------------------------
-        // 2. Powerlifting Standard Depth Check
-        // ----------------------------------------------------
-        // Note: Y coordinates increase downward in screen space.
-        // Depth is met when hip crease Y >= top of knee joint Y.
+        // 2. Powerlifting Standard Depth Check (hip crease below top of knee)
         const isAtDepth = hip.y >= topOfKneeY;
-        
-        // Calculate interior knee joint angle
         const kneeAngle = calculateAngle(hip, knee, ankle);
 
-        // ----------------------------------------------------
-        // 3. Safe DOM Updates (Prevents UI exceptions)
-        // ----------------------------------------------------
-        const angleEl = document.getElementById('kneeAngleLabel') || document.getElementById('angle');
-        if (angleEl) {
-          angleEl.innerText = `${Math.round(kneeAngle)}°`;
+        // 3. UI Label Updates
+        if (kneeAngleLabel) {
+          kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
         }
 
-        const statusEl = document.getElementById('depthStatusLabel') || document.getElementById('status');
-        if (statusEl) {
-          statusEl.innerText = isAtDepth ? "DEPTH MET" : "ABOVE PARALLEL";
-          statusEl.style.color = isAtDepth ? "#34C759" : "#FF3B30";
+        if (depthStatusLabel) {
+          depthStatusLabel.innerText = isAtDepth ? "DEPTH MET" : "ABOVE PARALLEL";
+          depthStatusLabel.style.color = isAtDepth ? "#34C759" : "#FF3B30";
         }
 
-        const badgeEl = document.getElementById('statusBadge') || document.querySelector('.badge');
-        if (badgeEl) {
-          badgeEl.innerText = isAtDepth ? "DEPTH REACHED" : "ABOVE PARALLEL";
-          badgeEl.className = isAtDepth ? "badge depth-reached" : "badge above-parallel";
+        if (statusBadge) {
+          statusBadge.innerText = isAtDepth ? "DEPTH REACHED" : "ABOVE PARALLEL";
+          statusBadge.className = isAtDepth ? "badge depth-reached" : "badge above-parallel";
         }
 
-        // ----------------------------------------------------
         // 4. Canvas Overlay Visuals Drawing
-        // ----------------------------------------------------
-        // Convert normalized coordinates (0.0 - 1.0) to Canvas pixel dimensions
         const p1 = { x: hip.x * canvasElement.width, y: hip.y * canvasElement.height };
         const p2 = { x: knee.x * canvasElement.width, y: knee.y * canvasElement.height };
         const p3 = { x: ankle.x * canvasElement.width, y: ankle.y * canvasElement.height };
@@ -150,7 +142,7 @@ function onResults(results) {
         canvasCtx.lineWidth = 2;
         canvasCtx.setLineDash([6, 6]);
         canvasCtx.stroke();
-        canvasCtx.setLineDash([]); // Reset dash state
+        canvasCtx.setLineDash([]);
 
         // Draw Joint Node Markers
         [p1, p2, p3].forEach(point => {
@@ -163,35 +155,104 @@ function onResults(results) {
     }
     canvasCtx.restore();
   } catch (err) {
-    console.error("Error inside onResults processing:", err);
+    console.error("Error in onResults execution:", err);
   } finally {
-    // Release frame processing state lock to ensure smooth playback loop
+    // Release execution lock
     isProcessingFrame = false;
   }
 }
 
 // ==========================================
-// Frame Processing Loop Execution
+// Frame Processing Execution & Listeners
 // ==========================================
-async function processVideoFrame() {
-  if (videoElement && !videoElement.paused && !videoElement.ended) {
-    if (!isProcessingFrame) {
-      isProcessingFrame = true;
+
+async function sendFrameToMediaPipe() {
+  if (videoElement && videoElement.readyState >= 2 && !isProcessingFrame) {
+    isProcessingFrame = true;
+    try {
       await pose.send({ image: videoElement });
+    } catch (e) {
+      console.error("MediaPipe frame send error:", e);
+      isProcessingFrame = false;
     }
-    requestAnimationFrame(processVideoFrame);
   }
 }
 
-// Playback listener triggers frame processing automatically
+function processVideoLoop() {
+  if (videoElement && !videoElement.paused && !videoElement.ended) {
+    sendFrameToMediaPipe();
+
+    if ('requestVideoFrameCallback' in videoElement) {
+      videoElement.requestVideoFrameCallback(processVideoLoop);
+    } else {
+      setTimeout(processVideoLoop, 1000 / 30);
+    }
+  }
+}
+
+// File Input Handler
+if (fileInput) {
+  fileInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const videoURL = URL.createObjectURL(file);
+      videoElement.src = videoURL;
+      videoElement.load();
+
+      if (btnPlayPause) btnPlayPause.disabled = false;
+      if (btnPrevFrame) btnPrevFrame.disabled = false;
+      if (btnNextFrame) btnNextFrame.disabled = false;
+
+      if (statusBadge) {
+        statusBadge.innerText = "Video Loaded";
+        statusBadge.className = "badge";
+      }
+    }
+  });
+}
+
+// Play / Pause Controls
+if (btnPlayPause) {
+  btnPlayPause.addEventListener('click', () => {
+    if (videoElement.paused) {
+      videoElement.play();
+      btnPlayPause.innerText = "Pause";
+    } else {
+      videoElement.pause();
+      btnPlayPause.innerText = "Play";
+    }
+  });
+}
+
 if (videoElement) {
   videoElement.addEventListener('play', () => {
-    processVideoFrame();
-  });
-  
-  videoElement.addEventListener('seeked', async () => {
-    if (videoElement.paused) {
-      await pose.send({ image: videoElement });
+    if ('requestVideoFrameCallback' in videoElement) {
+      videoElement.requestVideoFrameCallback(processVideoLoop);
+    } else {
+      processVideoLoop();
     }
+  });
+
+  videoElement.addEventListener('seeked', () => {
+    sendFrameToMediaPipe();
+  });
+}
+
+// Frame Scrubbing Buttons
+if (btnNextFrame) {
+  btnNextFrame.addEventListener('click', () => {
+    if (!videoElement) return;
+    videoElement.pause();
+    if (btnPlayPause) btnPlayPause.innerText = "Play";
+    videoElement.currentTime = Math.min(videoElement.duration, videoElement.currentTime + FRAME_TIME);
+  });
+}
+
+if (btnPrevFrame) {
+  btnPrevFrame.addEventListener('click', () => {
+    if (!videoElement) return;
+    videoElement.pause();
+    if (btnPlayPause) btnPlayPause.innerText = "Play";
+    videoElement.currentTime = Math.max(0, videoElement.currentTime - FRAME_TIME);
   });
 }
