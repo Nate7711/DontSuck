@@ -1,4 +1,25 @@
 // ==========================================
+// Application Revision Counter
+// Increment this string on every deploy to verify updates!
+// ==========================================
+const APP_VERSION = "v1.0.1";
+
+// Populate version tag as soon as DOM loads
+function updateVersionDisplay() {
+  const versionElement = document.getElementById('app-version');
+  if (versionElement) {
+    versionElement.innerText = APP_VERSION;
+  }
+  console.log(`[App Initialization] Loaded Version: ${APP_VERSION}`);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', updateVersionDisplay);
+} else {
+  updateVersionDisplay();
+}
+
+// ==========================================
 // DOM Elements Setup
 // ==========================================
 const videoElement = document.getElementById('uploaded-video') || document.querySelector('video');

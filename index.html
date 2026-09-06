@@ -2,59 +2,64 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Form Analyzer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Squat Depth Analyzer</title>
   
-  <!-- iOS Native Full-Screen App Settings -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Form Analyzer">
-  <link rel="manifest" href="manifest.json">
-
-  <link rel="stylesheet" href="style.css">
-  
-  <!-- MediaPipe Pose CDN Scripts -->
+  <!-- MediaPipe Pose Dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
   <div class="app-container">
-    <header>
-      <h1>Form Analyzer</h1>
-      <div id="status-badge" class="badge">No Video Loaded</div>
+    <!-- Header with Revision Counter -->
+    <header class="app-header">
+      <h1>Squat Depth Analyzer</h1>
+      <div class="version-tag">
+        Build: <span id="app-version">v0.0.0</span>
+      </div>
     </header>
 
-    <!-- File Upload Section -->
-    <div class="upload-section">
-      <label for="video-upload" class="upload-btn">📁 Select Video from Camera Roll</label>
-      <input type="file" id="video-upload" accept="video/*">
-    </div>
-
-    <!-- Video & Canvas Overlay Stack -->
-    <div class="video-wrapper">
-      <video id="uploaded-video" playsinline muted></video>
+    <!-- Main Video & Canvas Viewport -->
+    <div class="viewport-container">
+      <video id="uploaded-video" playsinline muted webkit-playsinline></video>
       <canvas id="output-canvas"></canvas>
     </div>
 
-    <!-- Playback & Frame Scrubbing Controls -->
-    <div class="controls-panel">
-      <button id="btn-play-pause" class="control-btn" disabled>Play</button>
-      <button id="btn-prev-frame" class="control-btn" disabled>⏮ -1 Frame</button>
-      <button id="btn-next-frame" class="control-btn" disabled>+1 Frame ⏭</button>
+    <!-- Status & Analysis Panel -->
+    <div class="analysis-panel">
+      <div id="status-badge" class="badge">NO VIDEO LOADED</div>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-title">Knee Angle</span>
+          <span id="knee-angle" class="metric-value">--°</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-title">Depth Status</span>
+          <span id="depth-status" class="metric-value">--</span>
+        </div>
+      </div>
     </div>
 
-    <!-- Real-Time Metrics Display -->
-    <div class="metrics-panel">
-      <div class="metric">
-        <span class="label">Knee Angle</span>
-        <span id="knee-angle" class="value">--°</span>
+    <!-- Controls & File Upload -->
+    <div class="controls-panel">
+      <div class="file-input-wrapper">
+        <label for="video-upload" class="btn-upload">Select / Record Video</label>
+        <input type="file" id="video-upload" accept="video/*">
       </div>
-      <div class="metric">
-        <span class="label">Squat Depth</span>
-        <span id="depth-status" class="value">--</span>
+
+      <div class="playback-controls">
+        <button id="btn-prev-frame" disabled>&laquo; Prev Frame</button>
+        <button id="btn-play-pause" disabled>Play</button>
+        <button id="btn-next-frame" disabled>Next Frame &raquo;</button>
       </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <!-- Main App Script (Update ?v= string whenever app.js changes) -->
+  <script src="app.js?v=1.0.1"></script>
 </body>
 </html>
