@@ -2,7 +2,7 @@
 // Application Revision Counter
 // Increment this string on every deploy to verify updates!
 // ==========================================
-const APP_VERSION = "v1.0.1";
+const APP_VERSION = "v1.0.2";
 
 // Populate version tag as soon as DOM loads
 function updateVersionDisplay() {
@@ -39,9 +39,25 @@ const FRAME_TIME = 1 / 30; // ~30 FPS step duration
 let isProcessingFrame = false;
 let poseInstance = null;
 
+// Landmark Smoothing Cache
+let smoothedLandmarks = null;
+const SMOOTHING_FACTOR = 0.35; // Lower = smoother motion/less jitter (0.2-0.4 optimal)
+
 // ==========================================
-// Helper Math Functions
+// Helper Math & Smoothing Functions
 // ==========================================
+
+/**
+ * Exponential Moving Average (EMA) filter to prevent landmark jitter
+ */
+function smoothPoint(prev, current, factor) {
+  if (!prev) return { x: current.x, y: current.y, visibility: current.visibility };
+  return {
+    x: prev.x + factor * (current.x - prev.x),
+    y: prev.y + factor * (current.y - prev.y),
+    visibility: current.visibility
+  };
+}
 
 /**
  * Calculates 2D interior angle in degrees between three points (A, B, C)
@@ -103,15 +119,26 @@ function onResults(results) {
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
     if (results && results.poseLandmarks) {
+      const raw = results.poseLandmarks;
+
+      // Initialize or smooth landmark history
+      if (!smoothedLandmarks) {
+        smoothedLandmarks = [...raw];
+      } else {
+        for (let i = 0; i < raw.length; i++) {
+          smoothedLandmarks[i] = smoothPoint(smoothedLandmarks[i], raw[i], SMOOTHING_FACTOR);
+        }
+      }
+
       // Left side joint landmarks
-      const leftHip = results.poseLandmarks[23];
-      const leftKnee = results.poseLandmarks[25];
-      const leftAnkle = results.poseLandmarks[27];
+      const leftHip = smoothedLandmarks[23];
+      const leftKnee = smoothedLandmarks[25];
+      const leftAnkle = smoothedLandmarks[27];
 
       // Right side joint landmarks
-      const rightHip = results.poseLandmarks[24];
-      const rightKnee = results.poseLandmarks[26];
-      const rightAnkle = results.poseLandmarks[28];
+      const rightHip = smoothedLandmarks[24];
+      const rightKnee = smoothedLandmarks[26];
+      const rightAnkle = smoothedLandmarks[28];
 
       // Select side facing camera based on highest landmark visibility
       const leftVis = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
@@ -133,7 +160,7 @@ function onResults(results) {
         const dynamicKneeOffset = femurLength * 0.14;
         const topOfKneeY = knee.y - dynamicKneeOffset;
 
-        // 2. Powerlifting Standard Depth Check
+        // 2. Powerlifting Standard Depth Check (Hip crease below top of knee)
         const isAtDepth = hip.y >= topOfKneeY;
         const kneeAngle = calculateAngle(hip, knee, ankle);
 
@@ -231,7 +258,9 @@ if (fileInput) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
 
-    // Set crossOrigin attribute to bypass WebGL canvas taint errors
+    // Reset smoothing state for new video
+    smoothedLandmarks = null;
+
     if (videoElement) {
       videoElement.crossOrigin = "anonymous";
     }
@@ -249,7 +278,6 @@ if (fileInput) {
 }
 
 if (videoElement) {
-  // Triggered when video metadata (dimensions, duration) is ready
   videoElement.addEventListener('loadedmetadata', () => {
     if (canvasElement && videoElement.videoWidth) {
       canvasElement.width = videoElement.videoWidth;
@@ -265,7 +293,6 @@ if (videoElement) {
       statusBadge.className = "badge";
     }
 
-    // Process initial frame so overlay shows on paused start frame
     sendFrameToMediaPipe();
   });
 
