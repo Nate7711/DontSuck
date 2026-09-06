@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Squat Depth Analyzer</title>
   
   <!-- MediaPipe Pose Dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
 
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=1.0.3">
 </head>
 <body>
 
@@ -22,8 +22,8 @@
       </div>
     </header>
 
-    <!-- Main Video & Canvas Viewport -->
-    <div class="viewport-container">
+    <!-- Main Video & Canvas Viewport Frame -->
+    <div class="viewport-container" id="viewport-frame">
       <video id="uploaded-video" playsinline muted webkit-playsinline></video>
       <canvas id="output-canvas"></canvas>
     </div>
@@ -52,14 +52,14 @@
       </div>
 
       <div class="playback-controls">
-        <button id="btn-prev-frame" disabled>&laquo; Prev Frame</button>
+        <button id="btn-prev-frame" disabled>&laquo; Prev</button>
         <button id="btn-play-pause" disabled>Play</button>
-        <button id="btn-next-frame" disabled>Next Frame &raquo;</button>
+        <button id="btn-next-frame" disabled>Next &raquo;</button>
       </div>
     </div>
   </div>
 
-  <!-- Main App Script (Update ?v= string whenever app.js changes) -->
-  <script src="app.js?v=1.0.1"></script>
+  <!-- Main App Script -->
+  <script src="app.js?v=1.0.3"></script>
 </body>
 </html>
