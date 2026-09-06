@@ -2,7 +2,7 @@
 // Application Revision Counter
 // Increment this string on every deploy to verify updates!
 // ==========================================
-const APP_VERSION = "v1.0.2";
+const APP_VERSION = "v1.0.3";
 
 // Populate version tag as soon as DOM loads
 function updateVersionDisplay() {
@@ -24,6 +24,7 @@ if (document.readyState === 'loading') {
 // ==========================================
 const videoElement = document.getElementById('uploaded-video') || document.querySelector('video');
 const canvasElement = document.getElementById('output-canvas') || document.querySelector('canvas');
+const viewportContainer = document.getElementById('viewport-frame');
 const canvasCtx = canvasElement ? canvasElement.getContext('2d') : null;
 const fileInput = document.getElementById('video-upload');
 
@@ -41,15 +42,49 @@ let poseInstance = null;
 
 // Landmark Smoothing Cache
 let smoothedLandmarks = null;
-const SMOOTHING_FACTOR = 0.35; // Lower = smoother motion/less jitter (0.2-0.4 optimal)
+const SMOOTHING_FACTOR = 0.35;
+
+// ==========================================
+// Canvas & Video Aspect-Ratio Layout Alignment
+// ==========================================
+function syncCanvasSize() {
+  if (!videoElement || !canvasElement || !videoElement.videoWidth || !videoElement.videoHeight) return;
+
+  // Internal pixel buffer dimensions match original video stream
+  canvasElement.width = videoElement.videoWidth;
+  canvasElement.height = videoElement.videoHeight;
+
+  // Calculate CSS displayed bounds to match object-fit: contain letterboxing
+  const containerRect = viewportContainer.getBoundingClientRect();
+  const videoRatio = videoElement.videoWidth / videoElement.videoHeight;
+  const containerRatio = containerRect.width / containerRect.height;
+
+  let displayWidth, displayHeight, topOffset, leftOffset;
+
+  if (containerRatio > videoRatio) {
+    displayHeight = containerRect.height;
+    displayWidth = displayHeight * videoRatio;
+    topOffset = 0;
+    leftOffset = (containerRect.width - displayWidth) / 2;
+  } else {
+    displayWidth = containerRect.width;
+    displayHeight = displayWidth / videoRatio;
+    leftOffset = 0;
+    topOffset = (containerRect.height - displayHeight) / 2;
+  }
+
+  canvasElement.style.width = `${displayWidth}px`;
+  canvasElement.style.height = `${displayHeight}px`;
+  canvasElement.style.top = `${topOffset}px`;
+  canvasElement.style.left = `${leftOffset}px`;
+}
+
+window.addEventListener('resize', syncCanvasSize);
 
 // ==========================================
 // Helper Math & Smoothing Functions
 // ==========================================
 
-/**
- * Exponential Moving Average (EMA) filter to prevent landmark jitter
- */
 function smoothPoint(prev, current, factor) {
   if (!prev) return { x: current.x, y: current.y, visibility: current.visibility };
   return {
@@ -59,10 +94,6 @@ function smoothPoint(prev, current, factor) {
   };
 }
 
-/**
- * Calculates 2D interior angle in degrees between three points (A, B, C)
- * B is the vertex point (knee)
- */
 function calculateAngle(a, b, c) {
   const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
   let angle = Math.abs((radians * 180.0) / Math.PI);
@@ -99,7 +130,6 @@ function initMediaPipePose() {
   console.log("MediaPipe Pose initialized successfully.");
 }
 
-// Start MediaPipe initialization
 initMediaPipePose();
 
 // ==========================================
@@ -109,11 +139,7 @@ function onResults(results) {
   try {
     if (!canvasElement || !canvasCtx || !videoElement) return;
 
-    // Match canvas dimensions to actual video resolution
-    if (videoElement.videoWidth && canvasElement.width !== videoElement.videoWidth) {
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-    }
+    syncCanvasSize();
 
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
@@ -121,7 +147,6 @@ function onResults(results) {
     if (results && results.poseLandmarks) {
       const raw = results.poseLandmarks;
 
-      // Initialize or smooth landmark history
       if (!smoothedLandmarks) {
         smoothedLandmarks = [...raw];
       } else {
@@ -140,7 +165,6 @@ function onResults(results) {
       const rightKnee = smoothedLandmarks[26];
       const rightAnkle = smoothedLandmarks[28];
 
-      // Select side facing camera based on highest landmark visibility
       const leftVis = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
       const rightVis = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
       const useLeft = leftVis >= rightVis;
@@ -156,15 +180,14 @@ function onResults(results) {
         const dy = hip.y - knee.y;
         const femurLength = Math.sqrt(dx * dx + dy * dy);
 
-        // Knee joint top surface is ~14% of femur length above joint pivot
         const dynamicKneeOffset = femurLength * 0.14;
         const topOfKneeY = knee.y - dynamicKneeOffset;
 
-        // 2. Powerlifting Standard Depth Check (Hip crease below top of knee)
+        // 2. Powerlifting Standard Depth Check
         const isAtDepth = hip.y >= topOfKneeY;
         const kneeAngle = calculateAngle(hip, knee, ankle);
 
-        // 3. UI Status Label Updates
+        // 3. UI Status Updates
         if (kneeAngleLabel) {
           kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
         }
@@ -179,13 +202,13 @@ function onResults(results) {
           statusBadge.className = isAtDepth ? "badge depth-reached" : "badge above-parallel";
         }
 
-        // 4. Canvas Overlay Visuals
+        // 4. Draw Overlay Lines
         const p1 = { x: hip.x * canvasElement.width, y: hip.y * canvasElement.height };
         const p2 = { x: knee.x * canvasElement.width, y: knee.y * canvasElement.height };
         const p3 = { x: ankle.x * canvasElement.width, y: ankle.y * canvasElement.height };
         const topKneeYPx = topOfKneeY * canvasElement.height;
 
-        // Draw Skeleton Lines (Hip -> Knee -> Ankle)
+        // Draw Skeleton Lines
         canvasCtx.beginPath();
         canvasCtx.moveTo(p1.x, p1.y);
         canvasCtx.lineTo(p2.x, p2.y);
@@ -194,7 +217,7 @@ function onResults(results) {
         canvasCtx.lineWidth = Math.max(4, Math.floor(canvasElement.width / 100));
         canvasCtx.stroke();
 
-        // Draw Top-of-Knee Reference Line (Dashed Horizon)
+        // Draw Top-of-Knee Reference Line
         canvasCtx.beginPath();
         canvasCtx.moveTo(p1.x - 80, topKneeYPx);
         canvasCtx.lineTo(p2.x + 80, topKneeYPx);
@@ -222,7 +245,7 @@ function onResults(results) {
 }
 
 // ==========================================
-// Frame Processing Pipeline
+// Frame Processing Execution
 // ==========================================
 
 async function sendFrameToMediaPipe() {
@@ -250,7 +273,7 @@ function processVideoLoop() {
 }
 
 // ==========================================
-// File Input & Video Event Handlers
+// Event Listeners
 // ==========================================
 
 if (fileInput) {
@@ -258,7 +281,6 @@ if (fileInput) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
 
-    // Reset smoothing state for new video
     smoothedLandmarks = null;
 
     if (videoElement) {
@@ -279,10 +301,7 @@ if (fileInput) {
 
 if (videoElement) {
   videoElement.addEventListener('loadedmetadata', () => {
-    if (canvasElement && videoElement.videoWidth) {
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-    }
+    syncCanvasSize();
 
     if (btnPlayPause) btnPlayPause.disabled = false;
     if (btnPrevFrame) btnPrevFrame.disabled = false;
@@ -310,10 +329,7 @@ if (videoElement) {
   });
 }
 
-// ==========================================
-// Control Buttons Event Listeners
-// ==========================================
-
+// Control Buttons
 if (btnPlayPause) {
   btnPlayPause.addEventListener('click', async () => {
     if (!videoElement || !videoElement.src) return;
