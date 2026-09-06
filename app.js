@@ -11,7 +11,9 @@ const btnPlayPause = document.getElementById('btn-play-pause');
 const btnPrevFrame = document.getElementById('btn-prev-frame');
 const btnNextFrame = document.getElementById('btn-next-frame');
 
-const FRAME_TIME = 1 / 30; // Approx 30 FPS frame duration
+const FRAME_TIME = 1 / 30; // Approx 30 FPS
+let isProcessingFrame = false;
+let frameCallbackId = null;
 
 // Trigonometric calculation for joint angles
 function calculateAngle(a, b, c) {
@@ -25,7 +27,8 @@ function calculateAngle(a, b, c) {
 
 // MediaPipe Results Processing
 function onResults(results) {
-  if (canvasElement.width !== videoElement.videoWidth) {
+  // Match canvas rendering context to natural video dimensions
+  if (videoElement.videoWidth && canvasElement.width !== videoElement.videoWidth) {
     canvasElement.width = videoElement.videoWidth;
     canvasElement.height = videoElement.videoHeight;
   }
@@ -33,7 +36,7 @@ function onResults(results) {
   canvasCtx.save();
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-  if (results.poseLandmarks) {
+  if (results && results.poseLandmarks) {
     const leftHip = results.poseLandmarks[23];
     const leftKnee = results.poseLandmarks[25];
     const leftAnkle = results.poseLandmarks[27];
@@ -42,17 +45,20 @@ function onResults(results) {
     const rightKnee = results.poseLandmarks[26];
     const rightAnkle = results.poseLandmarks[28];
 
-    const useLeft = (leftHip.visibility + leftKnee.visibility + leftAnkle.visibility) >=
-                    (rightHip.visibility + rightKnee.visibility + rightAnkle.visibility);
+    // Determine side visibility
+    const leftVis = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
+    const rightVis = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
+    const useLeft = leftVis >= rightVis;
 
     const hip = useLeft ? leftHip : rightHip;
     const knee = useLeft ? leftKnee : rightKnee;
     const ankle = useLeft ? leftAnkle : rightAnkle;
 
-    if (hip.visibility > 0.4 && knee.visibility > 0.4 && ankle.visibility > 0.4) {
+    if (hip && knee && ankle && hip.visibility > 0.3 && knee.visibility > 0.3 && ankle.visibility > 0.3) {
       const kneeAngle = calculateAngle(hip, knee, ankle);
       const isAtDepth = hip.y >= knee.y;
 
+      // Update UI Text Labels
       kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
       if (isAtDepth) {
         depthStatusLabel.innerText = "DEPTH MET";
@@ -66,35 +72,40 @@ function onResults(results) {
         statusBadge.className = "badge above-parallel";
       }
 
+      // Coordinates for overlay drawing
       const p1 = { x: hip.x * canvasElement.width, y: hip.y * canvasElement.height };
       const p2 = { x: knee.x * canvasElement.width, y: knee.y * canvasElement.height };
       const p3 = { x: ankle.x * canvasElement.width, y: ankle.y * canvasElement.height };
 
+      // Draw Skeleton Lines
       canvasCtx.beginPath();
       canvasCtx.moveTo(p1.x, p1.y);
       canvasCtx.lineTo(p2.x, p2.y);
       canvasCtx.lineTo(p3.x, p3.y);
       canvasCtx.strokeStyle = isAtDepth ? '#34C759' : '#FF3B30';
-      canvasCtx.lineWidth = 6;
+      canvasCtx.lineWidth = Math.max(4, Math.floor(canvasElement.width / 100));
       canvasCtx.stroke();
 
+      // Draw Keypoint Markers
       [p1, p2, p3].forEach(point => {
         canvasCtx.beginPath();
-        canvasCtx.arc(point.x, point.y, 10, 0, 2 * Math.PI);
+        canvasCtx.arc(point.x, point.y, Math.max(6, Math.floor(canvasElement.width / 80)), 0, 2 * Math.PI);
         canvasCtx.fillStyle = isAtDepth ? '#34C759' : '#FF3B30';
         canvasCtx.fill();
       });
     }
   }
   canvasCtx.restore();
+  isProcessingFrame = false;
 }
 
+// Initialize MediaPipe Pose Model
 const pose = new Pose({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
 });
 
 pose.setOptions({
-  modelComplexity: 1,
+  modelComplexity: 0, // Lowered to 0 for mobile stability & fast GPU execution on iOS
   smoothLandmarks: true,
   minDetectionConfidence: 0.5,
   minTrackingConfidence: 0.5
@@ -102,12 +113,32 @@ pose.setOptions({
 
 pose.onResults(onResults);
 
-async function processFrame() {
-  if (videoElement.readyState >= 2) {
-    await pose.send({ image: videoElement });
+// Core Frame Processing Function
+async function analyzeCurrentFrame() {
+  if (videoElement.readyState >= 2 && !isProcessingFrame) {
+    isProcessingFrame = true;
+    try {
+      await pose.send({ image: videoElement });
+    } catch (e) {
+      console.error("Pose processing error:", e);
+      isProcessingFrame = false;
+    }
   }
 }
 
+// Native Video Frame Callback for iOS Safari
+function processVideoLoop() {
+  if (!videoElement.paused && !videoElement.ended) {
+    analyzeCurrentFrame();
+    if ('requestVideoFrameCallback' in videoElement) {
+      videoElement.requestVideoFrameCallback(processVideoLoop);
+    } else {
+      setTimeout(processVideoLoop, 1000 / 30);
+    }
+  }
+}
+
+// File Input Selection
 fileInput.addEventListener('change', (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -124,6 +155,7 @@ fileInput.addEventListener('change', (event) => {
   }
 });
 
+// Play / Pause Handlers
 btnPlayPause.addEventListener('click', () => {
   if (videoElement.paused) {
     videoElement.play();
@@ -135,17 +167,16 @@ btnPlayPause.addEventListener('click', () => {
 });
 
 videoElement.addEventListener('play', () => {
-  function loop() {
-    if (!videoElement.paused && !videoElement.ended) {
-      processFrame();
-      requestAnimationFrame(loop);
-    }
+  if ('requestVideoFrameCallback' in videoElement) {
+    videoElement.requestVideoFrameCallback(processVideoLoop);
+  } else {
+    processVideoLoop();
   }
-  loop();
 });
 
+// Analyze individual frames when seeking or scrubbing
 videoElement.addEventListener('seeked', () => {
-  processFrame();
+  analyzeCurrentFrame();
 });
 
 btnNextFrame.addEventListener('click', () => {
