@@ -11,7 +11,7 @@ const btnPlayPause = document.getElementById('btn-play-pause');
 const btnPrevFrame = document.getElementById('btn-prev-frame');
 const btnNextFrame = document.getElementById('btn-next-frame');
 
-const FRAME_TIME = 1 / 30; // Approx 30 FPS frame duration (0.0333s)
+const FRAME_TIME = 1 / 30; // Approx 30 FPS frame duration
 
 // Trigonometric calculation for joint angles
 function calculateAngle(a, b, c) {
@@ -25,7 +25,6 @@ function calculateAngle(a, b, c) {
 
 // MediaPipe Results Processing
 function onResults(results) {
-  // Sync canvas size to internal video resolution
   if (canvasElement.width !== videoElement.videoWidth) {
     canvasElement.width = videoElement.videoWidth;
     canvasElement.height = videoElement.videoHeight;
@@ -35,8 +34,6 @@ function onResults(results) {
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
   if (results.poseLandmarks) {
-    // MediaPipe Indices: Left Hip = 23, Left Knee = 25, Left Ankle = 27
-    // Right Hip = 24, Right Knee = 26, Right Ankle = 28
     const leftHip = results.poseLandmarks[23];
     const leftKnee = results.poseLandmarks[25];
     const leftAnkle = results.poseLandmarks[27];
@@ -45,7 +42,6 @@ function onResults(results) {
     const rightKnee = results.poseLandmarks[26];
     const rightAnkle = results.poseLandmarks[28];
 
-    // Select whichever leg side has higher visibility confidence
     const useLeft = (leftHip.visibility + leftKnee.visibility + leftAnkle.visibility) >=
                     (rightHip.visibility + rightKnee.visibility + rightAnkle.visibility);
 
@@ -55,12 +51,8 @@ function onResults(results) {
 
     if (hip.visibility > 0.4 && knee.visibility > 0.4 && ankle.visibility > 0.4) {
       const kneeAngle = calculateAngle(hip, knee, ankle);
-
-      // Normalized coordinates: Y increases downwards.
-      // Hip crease is at or below knee when Hip Y >= Knee Y.
       const isAtDepth = hip.y >= knee.y;
 
-      // Update UI Metrics
       kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
       if (isAtDepth) {
         depthStatusLabel.innerText = "DEPTH MET";
@@ -74,7 +66,6 @@ function onResults(results) {
         statusBadge.className = "badge above-parallel";
       }
 
-      // Draw Joint Connectors
       const p1 = { x: hip.x * canvasElement.width, y: hip.y * canvasElement.height };
       const p2 = { x: knee.x * canvasElement.width, y: knee.y * canvasElement.height };
       const p3 = { x: ankle.x * canvasElement.width, y: ankle.y * canvasElement.height };
@@ -87,7 +78,6 @@ function onResults(results) {
       canvasCtx.lineWidth = 6;
       canvasCtx.stroke();
 
-      // Draw Keypoint Joint Markers
       [p1, p2, p3].forEach(point => {
         canvasCtx.beginPath();
         canvasCtx.arc(point.x, point.y, 10, 0, 2 * Math.PI);
@@ -99,7 +89,6 @@ function onResults(results) {
   canvasCtx.restore();
 }
 
-// Initialize MediaPipe Pose Instance
 const pose = new Pose({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
 });
@@ -113,14 +102,12 @@ pose.setOptions({
 
 pose.onResults(onResults);
 
-// Process current frame
 async function processFrame() {
   if (videoElement.readyState >= 2) {
     await pose.send({ image: videoElement });
   }
 }
 
-// Handle File Upload Event
 fileInput.addEventListener('change', (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -128,7 +115,6 @@ fileInput.addEventListener('change', (event) => {
     videoElement.src = videoURL;
     videoElement.load();
 
-    // Enable Control Buttons
     btnPlayPause.disabled = false;
     btnPrevFrame.disabled = false;
     btnNextFrame.disabled = false;
@@ -138,7 +124,6 @@ fileInput.addEventListener('change', (event) => {
   }
 });
 
-// Play / Pause Toggle
 btnPlayPause.addEventListener('click', () => {
   if (videoElement.paused) {
     videoElement.play();
@@ -149,7 +134,6 @@ btnPlayPause.addEventListener('click', () => {
   }
 });
 
-// Video Processing Loop
 videoElement.addEventListener('play', () => {
   function loop() {
     if (!videoElement.paused && !videoElement.ended) {
@@ -160,12 +144,10 @@ videoElement.addEventListener('play', () => {
   loop();
 });
 
-// Run Pose Estimation when Seeking or Pausing
 videoElement.addEventListener('seeked', () => {
   processFrame();
 });
 
-// Frame-by-Frame Scrubbing Controls
 btnNextFrame.addEventListener('click', () => {
   videoElement.pause();
   btnPlayPause.innerText = "Play";
