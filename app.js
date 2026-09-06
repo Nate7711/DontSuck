@@ -42,7 +42,7 @@ const pose = new Pose({
 });
 
 pose.setOptions({
-  modelComplexity: 0, // Lower complexity for smooth GPU performance and crash-free playback on iOS Safari
+  modelComplexity: 0, // Lower complexity for smooth GPU performance and crash-free playback
   smoothLandmarks: true,
   enableSegmentation: false,
   smoothSegmentation: false,
@@ -157,7 +157,6 @@ function onResults(results) {
   } catch (err) {
     console.error("Error in onResults execution:", err);
   } finally {
-    // Release execution lock
     isProcessingFrame = false;
   }
 }
@@ -190,42 +189,61 @@ function processVideoLoop() {
   }
 }
 
+// Explicit Video Initialization and Metadata Loader
+function setupLoadedVideo() {
+  if (!videoElement) return;
+
+  // Reset video playback position
+  videoElement.currentTime = 0;
+
+  // Enable all UI control elements
+  if (btnPlayPause) btnPlayPause.disabled = false;
+  if (btnPrevFrame) btnPrevFrame.disabled = false;
+  if (btnNextFrame) btnNextFrame.disabled = false;
+
+  // Sync canvas size immediately once metadata is ready
+  if (canvasElement && videoElement.videoWidth) {
+    canvasElement.width = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+  }
+
+  // Update status UI
+  if (statusBadge) {
+    statusBadge.innerText = "READY TO PLAY";
+    statusBadge.className = "badge";
+  }
+
+  // Trigger initial frame capture to render pose skeleton on thumbnail
+  sendFrameToMediaPipe();
+}
+
 // File Input Handler
 if (fileInput) {
   fileInput.addEventListener('change', (event) => {
-    const file = event.target.files[0];
+    const file = event.target.files && event.target.files[0];
     if (file) {
       const videoURL = URL.createObjectURL(file);
+      
+      videoElement.pause();
       videoElement.src = videoURL;
+      videoElement.removeAttribute('poster'); // Remove static poster if present
       videoElement.load();
 
-      if (btnPlayPause) btnPlayPause.disabled = false;
-      if (btnPrevFrame) btnPrevFrame.disabled = false;
-      if (btnNextFrame) btnNextFrame.disabled = false;
-
       if (statusBadge) {
-        statusBadge.innerText = "Video Loaded";
+        statusBadge.innerText = "LOADING VIDEO...";
         statusBadge.className = "badge";
       }
     }
   });
 }
 
-// Play / Pause Controls
-if (btnPlayPause) {
-  btnPlayPause.addEventListener('click', () => {
-    if (videoElement.paused) {
-      videoElement.play();
-      btnPlayPause.innerText = "Pause";
-    } else {
-      videoElement.pause();
-      btnPlayPause.innerText = "Play";
-    }
-  });
-}
-
+// Video Metadata & Load Event Listeners
 if (videoElement) {
+  videoElement.addEventListener('loadedmetadata', setupLoadedVideo);
+  videoElement.addEventListener('loadeddata', setupLoadedVideo);
+
   videoElement.addEventListener('play', () => {
+    if (btnPlayPause) btnPlayPause.innerText = "Pause";
     if ('requestVideoFrameCallback' in videoElement) {
       videoElement.requestVideoFrameCallback(processVideoLoop);
     } else {
@@ -233,17 +251,35 @@ if (videoElement) {
     }
   });
 
+  videoElement.addEventListener('pause', () => {
+    if (btnPlayPause) btnPlayPause.innerText = "Play";
+  });
+
   videoElement.addEventListener('seeked', () => {
     sendFrameToMediaPipe();
   });
 }
 
-// Frame Scrubbing Buttons
+// Play / Pause Controls
+if (btnPlayPause) {
+  btnPlayPause.addEventListener('click', () => {
+    if (!videoElement || !videoElement.src) return;
+
+    if (videoElement.paused) {
+      videoElement.play().catch((err) => {
+        console.error("Playback failed to start:", err);
+      });
+    } else {
+      videoElement.pause();
+    }
+  });
+}
+
+// Frame Scrubbing Controls
 if (btnNextFrame) {
   btnNextFrame.addEventListener('click', () => {
     if (!videoElement) return;
     videoElement.pause();
-    if (btnPlayPause) btnPlayPause.innerText = "Play";
     videoElement.currentTime = Math.min(videoElement.duration, videoElement.currentTime + FRAME_TIME);
   });
 }
@@ -252,7 +288,6 @@ if (btnPrevFrame) {
   btnPrevFrame.addEventListener('click', () => {
     if (!videoElement) return;
     videoElement.pause();
-    if (btnPlayPause) btnPlayPause.innerText = "Play";
     videoElement.currentTime = Math.max(0, videoElement.currentTime - FRAME_TIME);
   });
 }
