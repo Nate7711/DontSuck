@@ -14,8 +14,9 @@ const btnPlayPause = document.getElementById('btn-play-pause');
 const btnPrevFrame = document.getElementById('btn-prev-frame');
 const btnNextFrame = document.getElementById('btn-next-frame');
 
-const FRAME_TIME = 1 / 30; // Approx 30 FPS frame duration
+const FRAME_TIME = 1 / 30; // ~30 FPS step duration
 let isProcessingFrame = false;
+let poseInstance = null;
 
 // ==========================================
 // Helper Math Functions
@@ -23,7 +24,7 @@ let isProcessingFrame = false;
 
 /**
  * Calculates 2D interior angle in degrees between three points (A, B, C)
- * B is the vertex point (e.g., knee)
+ * B is the vertex point (knee)
  */
 function calculateAngle(a, b, c) {
   const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
@@ -37,20 +38,32 @@ function calculateAngle(a, b, c) {
 // ==========================================
 // MediaPipe Pose Initialization
 // ==========================================
-const pose = new Pose({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-});
+function initMediaPipePose() {
+  if (typeof Pose === 'undefined') {
+    console.warn("MediaPipe Pose CDN script not detected yet. Retrying...");
+    setTimeout(initMediaPipePose, 200);
+    return;
+  }
 
-pose.setOptions({
-  modelComplexity: 0, // Lower complexity for smooth GPU performance and crash-free playback
-  smoothLandmarks: true,
-  enableSegmentation: false,
-  smoothSegmentation: false,
-  minDetectionConfidence: 0.5,
-  minTrackingConfidence: 0.5
-});
+  poseInstance = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
 
-pose.onResults(onResults);
+  poseInstance.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    smoothSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  poseInstance.onResults(onResults);
+  console.log("MediaPipe Pose initialized successfully.");
+}
+
+// Start MediaPipe initialization
+initMediaPipePose();
 
 // ==========================================
 // MediaPipe Frame Results & Depth Processing
@@ -59,7 +72,7 @@ function onResults(results) {
   try {
     if (!canvasElement || !canvasCtx || !videoElement) return;
 
-    // Synchronize canvas dimensions with actual video dimensions
+    // Match canvas dimensions to actual video resolution
     if (videoElement.videoWidth && canvasElement.width !== videoElement.videoWidth) {
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
@@ -79,7 +92,7 @@ function onResults(results) {
       const rightKnee = results.poseLandmarks[26];
       const rightAnkle = results.poseLandmarks[28];
 
-      // Determine which side is facing the camera best using visibility confidence
+      // Select side facing camera based on highest landmark visibility
       const leftVis = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
       const rightVis = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
       const useLeft = leftVis >= rightVis;
@@ -88,7 +101,6 @@ function onResults(results) {
       const knee = useLeft ? leftKnee : rightKnee;
       const ankle = useLeft ? leftAnkle : rightAnkle;
 
-      // Ensure key landmarks are visible before evaluating depth
       if (hip && knee && ankle && hip.visibility > 0.3 && knee.visibility > 0.3 && ankle.visibility > 0.3) {
         
         // 1. Dynamic Anthropometric Knee-Top Offset Calculation
@@ -96,15 +108,15 @@ function onResults(results) {
         const dy = hip.y - knee.y;
         const femurLength = Math.sqrt(dx * dx + dy * dy);
 
-        // Top of knee cap surface is ~14% of total femur length above knee joint center
+        // Knee joint top surface is ~14% of femur length above joint pivot
         const dynamicKneeOffset = femurLength * 0.14;
         const topOfKneeY = knee.y - dynamicKneeOffset;
 
-        // 2. Powerlifting Standard Depth Check (hip crease below top of knee)
+        // 2. Powerlifting Standard Depth Check
         const isAtDepth = hip.y >= topOfKneeY;
         const kneeAngle = calculateAngle(hip, knee, ankle);
 
-        // 3. UI Label Updates
+        // 3. UI Status Label Updates
         if (kneeAngleLabel) {
           kneeAngleLabel.innerText = `${Math.round(kneeAngle)}°`;
         }
@@ -119,7 +131,7 @@ function onResults(results) {
           statusBadge.className = isAtDepth ? "badge depth-reached" : "badge above-parallel";
         }
 
-        // 4. Canvas Overlay Visuals Drawing
+        // 4. Canvas Overlay Visuals
         const p1 = { x: hip.x * canvasElement.width, y: hip.y * canvasElement.height };
         const p2 = { x: knee.x * canvasElement.width, y: knee.y * canvasElement.height };
         const p3 = { x: ankle.x * canvasElement.width, y: ankle.y * canvasElement.height };
@@ -134,17 +146,17 @@ function onResults(results) {
         canvasCtx.lineWidth = Math.max(4, Math.floor(canvasElement.width / 100));
         canvasCtx.stroke();
 
-        // Draw Top-of-Knee Reference Horizon Line (Dashed Yellow)
+        // Draw Top-of-Knee Reference Line (Dashed Horizon)
         canvasCtx.beginPath();
-        canvasCtx.moveTo(p1.x - 60, topKneeYPx);
-        canvasCtx.lineTo(p2.x + 60, topKneeYPx);
+        canvasCtx.moveTo(p1.x - 80, topKneeYPx);
+        canvasCtx.lineTo(p2.x + 80, topKneeYPx);
         canvasCtx.strokeStyle = '#FFCC00';
-        canvasCtx.lineWidth = 2;
+        canvasCtx.lineWidth = 3;
         canvasCtx.setLineDash([6, 6]);
         canvasCtx.stroke();
         canvasCtx.setLineDash([]);
 
-        // Draw Joint Node Markers
+        // Draw Joint Markers
         [p1, p2, p3].forEach(point => {
           canvasCtx.beginPath();
           canvasCtx.arc(point.x, point.y, Math.max(6, Math.floor(canvasElement.width / 80)), 0, 2 * Math.PI);
@@ -155,25 +167,25 @@ function onResults(results) {
     }
     canvasCtx.restore();
   } catch (err) {
-    console.error("Error in onResults execution:", err);
+    console.error("Error drawing onResults overlay:", err);
   } finally {
     isProcessingFrame = false;
   }
 }
 
 // ==========================================
-// Frame Processing Execution & Listeners
+// Frame Processing Pipeline
 // ==========================================
 
 async function sendFrameToMediaPipe() {
-  if (videoElement && videoElement.readyState >= 2 && !isProcessingFrame) {
-    isProcessingFrame = true;
-    try {
-      await pose.send({ image: videoElement });
-    } catch (e) {
-      console.error("MediaPipe frame send error:", e);
-      isProcessingFrame = false;
-    }
+  if (!poseInstance || !videoElement || videoElement.readyState < 2 || isProcessingFrame) return;
+
+  isProcessingFrame = true;
+  try {
+    await poseInstance.send({ image: videoElement });
+  } catch (e) {
+    console.error("MediaPipe frame send error:", e);
+    isProcessingFrame = false;
   }
 }
 
@@ -189,66 +201,56 @@ function processVideoLoop() {
   }
 }
 
-// Explicit Video Initialization and Metadata Loader
-function setupLoadedVideo() {
-  if (!videoElement) return;
+// ==========================================
+// File Input & Video Event Handlers
+// ==========================================
 
-  // Reset video playback position
-  videoElement.currentTime = 0;
-
-  // Enable all UI control elements
-  if (btnPlayPause) btnPlayPause.disabled = false;
-  if (btnPrevFrame) btnPrevFrame.disabled = false;
-  if (btnNextFrame) btnNextFrame.disabled = false;
-
-  // Sync canvas size immediately once metadata is ready
-  if (canvasElement && videoElement.videoWidth) {
-    canvasElement.width = videoElement.videoWidth;
-    canvasElement.height = videoElement.videoHeight;
-  }
-
-  // Update status UI
-  if (statusBadge) {
-    statusBadge.innerText = "READY TO PLAY";
-    statusBadge.className = "badge";
-  }
-
-  // Trigger initial frame capture to render pose skeleton on thumbnail
-  sendFrameToMediaPipe();
-}
-
-// File Input Handler
 if (fileInput) {
   fileInput.addEventListener('change', (event) => {
     const file = event.target.files && event.target.files[0];
-    if (file) {
-      const videoURL = URL.createObjectURL(file);
-      
-      videoElement.pause();
-      videoElement.src = videoURL;
-      videoElement.removeAttribute('poster'); // Remove static poster if present
-      videoElement.load();
+    if (!file) return;
 
-      if (statusBadge) {
-        statusBadge.innerText = "LOADING VIDEO...";
-        statusBadge.className = "badge";
-      }
+    // Set crossOrigin attribute to bypass WebGL canvas taint errors
+    if (videoElement) {
+      videoElement.crossOrigin = "anonymous";
+    }
+
+    const videoURL = URL.createObjectURL(file);
+    videoElement.pause();
+    videoElement.src = videoURL;
+    videoElement.load();
+
+    if (statusBadge) {
+      statusBadge.innerText = "LOADING METADATA...";
+      statusBadge.className = "badge";
     }
   });
 }
 
-// Video Metadata & Load Event Listeners
 if (videoElement) {
-  videoElement.addEventListener('loadedmetadata', setupLoadedVideo);
-  videoElement.addEventListener('loadeddata', setupLoadedVideo);
+  // Triggered when video metadata (dimensions, duration) is ready
+  videoElement.addEventListener('loadedmetadata', () => {
+    if (canvasElement && videoElement.videoWidth) {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+    }
+
+    if (btnPlayPause) btnPlayPause.disabled = false;
+    if (btnPrevFrame) btnPrevFrame.disabled = false;
+    if (btnNextFrame) btnNextFrame.disabled = false;
+
+    if (statusBadge) {
+      statusBadge.innerText = "READY TO PLAY";
+      statusBadge.className = "badge";
+    }
+
+    // Process initial frame so overlay shows on paused start frame
+    sendFrameToMediaPipe();
+  });
 
   videoElement.addEventListener('play', () => {
     if (btnPlayPause) btnPlayPause.innerText = "Pause";
-    if ('requestVideoFrameCallback' in videoElement) {
-      videoElement.requestVideoFrameCallback(processVideoLoop);
-    } else {
-      processVideoLoop();
-    }
+    processVideoLoop();
   });
 
   videoElement.addEventListener('pause', () => {
@@ -260,27 +262,31 @@ if (videoElement) {
   });
 }
 
-// Play / Pause Controls
+// ==========================================
+// Control Buttons Event Listeners
+// ==========================================
+
 if (btnPlayPause) {
-  btnPlayPause.addEventListener('click', () => {
+  btnPlayPause.addEventListener('click', async () => {
     if (!videoElement || !videoElement.src) return;
 
     if (videoElement.paused) {
-      videoElement.play().catch((err) => {
-        console.error("Playback failed to start:", err);
-      });
+      try {
+        await videoElement.play();
+      } catch (err) {
+        console.error("Playback trigger blocked by browser:", err);
+      }
     } else {
       videoElement.pause();
     }
   });
 }
 
-// Frame Scrubbing Controls
 if (btnNextFrame) {
   btnNextFrame.addEventListener('click', () => {
     if (!videoElement) return;
     videoElement.pause();
-    videoElement.currentTime = Math.min(videoElement.duration, videoElement.currentTime + FRAME_TIME);
+    videoElement.currentTime = Math.min(videoElement.duration || 0, videoElement.currentTime + FRAME_TIME);
   });
 }
 
